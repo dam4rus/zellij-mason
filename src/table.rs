@@ -5,22 +5,22 @@ use crate::Rect;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TableState {
-    selected_index: Option<usize>,
-    scroll_offset: usize,
+    selected: Option<usize>,
+    scroll: usize,
 }
 
 impl TableState {
-    pub fn selected_index(&self) -> Option<usize> {
-        self.selected_index
+    pub fn selected(&self) -> Option<usize> {
+        self.selected
     }
 
-    pub fn select_index(&mut self, index: usize) {
-        self.selected_index = Some(index);
+    pub fn select(&mut self, index: usize) {
+        self.selected = Some(index);
     }
 
-    pub fn offset_selected_index(&mut self, offset: isize) {
-        self.selected_index = Some(
-            self.selected_index
+    pub fn offset_selected(&mut self, offset: isize) {
+        self.selected = Some(
+            self.selected
                 .map(|selected_index| match offset.cmp(&0) {
                     Ordering::Greater => selected_index.saturating_add(offset.unsigned_abs()),
                     Ordering::Less => selected_index.saturating_sub(offset.unsigned_abs()),
@@ -30,29 +30,37 @@ impl TableState {
         );
     }
 
+    pub fn select_next(&mut self) {
+        self.selected = Some(self.selected.map(|i| i.saturating_add(1)).unwrap_or(0));
+    }
+
+    pub fn select_prev(&mut self) {
+        self.selected = Some(self.selected.map(|i| i.saturating_sub(1)).unwrap_or(0));
+    }
+
     pub fn scroll_selected_to_view(&mut self, rect: Rect) {
-        if let Some(selected_index) = self.selected_index {
-            if selected_index < self.scroll_offset {
-                self.scroll_offset = selected_index;
-            } else if selected_index > self.scroll_offset + (rect.height - 2) {
-                self.scroll_offset = selected_index - (rect.height - 2);
+        if let Some(selected_index) = self.selected {
+            if selected_index < self.scroll {
+                self.scroll = selected_index;
+            } else if selected_index > self.scroll + (rect.height - 2) {
+                self.scroll = selected_index - (rect.height - 2);
             }
         }
     }
 }
 
-pub fn draw<const N: usize>(
+pub fn render<const N: usize>(
     header: [impl ToString; N],
     rows: &[[Text; N]],
     rect: Rect,
     state: &mut TableState,
 ) {
     if rows.is_empty() {
-        state.selected_index = None;
+        state.selected = None;
     } else {
-        state.selected_index = Some(
+        state.selected = Some(
             state
-                .selected_index
+                .selected
                 .map(|selected_index| {
                     if selected_index >= rows.len() {
                         rows.len() - 1
@@ -69,7 +77,7 @@ pub fn draw<const N: usize>(
     let table = rows
         .iter()
         .enumerate()
-        .skip(state.scroll_offset)
+        .skip(state.scroll)
         .take(rect.height - 1)
         .fold(
             Table::new().add_row(
@@ -80,7 +88,7 @@ pub fn draw<const N: usize>(
             |acc, (i, row)| {
                 let row = row
                     .iter()
-                    .map(|column| match state.selected_index {
+                    .map(|column| match state.selected {
                         Some(selected_index) if selected_index == i => column.clone().selected(),
                         _ => column.clone(),
                     })
