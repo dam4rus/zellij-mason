@@ -47,13 +47,16 @@ impl ListState {
         );
     }
 
-    pub fn selected_path(&self) -> Option<Vec<usize>> {
-        self.selected_tree_index.and_then(|selected| {
-            let mut path = Vec::new();
-            self.item_index_tree.path(selected, &mut path).then(|| {
-                path.reverse();
-                path
-            })
+    pub fn selected_path(&self) -> Option<Vec<ItemIndex>> {
+        self.selected_tree_index
+            .and_then(|selected| self.path(selected))
+    }
+
+    pub fn path(&self, index: usize) -> Option<Vec<ItemIndex>> {
+        let mut path = Vec::new();
+        self.item_index_tree.path(index, &mut path).then(|| {
+            path.reverse();
+            path
         })
     }
 
@@ -71,8 +74,43 @@ impl ListState {
         self.expansions.insert(index);
     }
 
-    pub fn collapse(&mut self, index: usize) {
-        self.expansions.remove(&index);
+    pub fn collapse(&mut self, index: usize) -> bool {
+        if self.expansions.remove(&index) {
+            if let Some(children) = self.item_index_tree.children(index) {
+                for list_index in children.flatten() {
+                    self.expansions.remove(&list_index);
+                }
+            }
+            true
+        } else {
+            let Some(&[.., parent, _]) = self.path(index).as_deref() else {
+                return false;
+            };
+
+            if self.expansions.remove(&parent.list_index) {
+                self.selected_tree_index = Some(parent.list_index);
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    pub fn expand_selected(&mut self) -> bool {
+        match self.selected_tree_index {
+            Some(selected_index) => {
+                self.expansions.insert(selected_index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn collapse_selected(&mut self) -> bool {
+        match self.selected_tree_index {
+            Some(selected_index) => self.collapse(selected_index),
+            _ => false,
+        }
     }
 }
 
@@ -102,8 +140,29 @@ impl ListItem {
 
     pub fn with_indent(mut self, indent: usize) -> Self {
         self.indent = indent;
+        self.children = self
+            .children
+            .into_iter()
+            .map(|child| child.with_indent(indent + 1))
+            .collect();
         self
     }
+
+    pub fn flatten(&self) -> Vec<&ListItem> {
+        once(self)
+            .chain(
+                self.children
+                    .iter()
+                    .flat_map(|list_item| list_item.flatten()),
+            )
+            .collect()
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ItemIndex {
+    pub list_index: usize,
+    pub index_at_indent: usize,
 }
 
 pub fn render(list_items: Vec<ListItem>, rect: Rect, state: &mut ListState) {
@@ -130,7 +189,7 @@ pub fn render(list_items: Vec<ListItem>, rect: Rect, state: &mut ListState) {
     if state.item_index_tree.0.is_empty() {
         state.selected_tree_index = None;
     } else {
-        // Getting the last element should never fail when the tree is empty
+        // Getting the last element should never fail when the tree is not empty
         let last_index = state.item_index_tree.last().unwrap();
         state.selected_tree_index = Some(
             state
@@ -148,12 +207,11 @@ pub fn render(list_items: Vec<ListItem>, rect: Rect, state: &mut ListState) {
     let items = list_items
         .into_iter()
         .flat_map(|list_item| {
-            once(list_item.item.indent(list_item.indent)).chain(
-                list_item
-                    .children
-                    .into_iter()
-                    .map(|child| child.item.indent(child.indent)),
-            )
+            list_item
+                .flatten()
+                .into_iter()
+                .map(|list_item| list_item.item.clone().indent(list_item.indent))
+                .collect::<Vec<_>>()
         })
         .enumerate()
         .filter(|(i, _)| state.item_index_tree.contains(*i))
@@ -176,15 +234,15 @@ impl ItemIndexTree {
         self.0
             .iter()
             .flat_map(|(i, children)| {
-                once(*i).chain(children.iter().flat_map(|child| child.flatten()))
+                once(*i).chain(children.iter().flat_map(|children| children.flatten()))
             })
             .collect()
     }
 
     fn contains(&self, index: usize) -> bool {
-        self.0.iter().any(|(key, value)| {
-            *key == index
-                || value
+        self.0.iter().any(|(list_index, children)| {
+            *list_index == index
+                || children
                     .as_ref()
                     .map(|children| children.contains(index))
                     .unwrap_or(false)
@@ -192,46 +250,70 @@ impl ItemIndexTree {
     }
 
     fn next(&self, index: usize) -> Option<usize> {
-        self.0.iter().find_map(|(key, value)| {
-            (*key > index)
-                .then_some(*key)
-                .or(value.as_ref().and_then(|children| children.next(index)))
+        self.0.iter().find_map(|(list_index, children)| {
+            (*list_index > index)
+                .then_some(*list_index)
+                .or(children.as_ref().and_then(|children| children.next(index)))
         })
     }
 
     fn prev(&self, index: usize) -> Option<usize> {
-        self.0.iter().rev().find_map(|(key, value)| {
-            value
+        self.0.iter().rev().find_map(|(list_index, children)| {
+            children
                 .as_ref()
                 .and_then(|children| children.prev(index))
-                .or((*key < index).then_some(*key))
+                .or((*list_index < index).then_some(*list_index))
         })
     }
 
     fn last(&self) -> Option<usize> {
-        self.0.last_key_value().map(|(key, value)| {
-            value
+        self.0.last_key_value().map(|(list_index, children)| {
+            children
                 .as_ref()
                 .and_then(|children| children.last())
-                .unwrap_or(*key)
+                .unwrap_or(*list_index)
         })
     }
 
-    fn path(&self, index: usize, out: &mut Vec<usize>) -> bool {
-        match self.0.keys().position(|i| *i == index) {
-            Some(position) => {
-                out.push(position);
-                true
-            }
-            None => match self.0.values().enumerate().find_map(|(i, children)| {
+    fn children(&self, index: usize) -> Option<&Self> {
+        self.0.iter().find_map(|(list_index, children)| {
+            if *list_index == index {
+                children.as_ref()
+            } else {
                 children
                     .as_ref()
-                    .map(|children| children.path(index, out))
-                    .unwrap_or(false)
-                    .then_some(i)
-            }) {
-                Some(position) => {
-                    out.push(position);
+                    .and_then(|children| children.children(index))
+            }
+        })
+    }
+
+    fn path(&self, index: usize, out: &mut Vec<ItemIndex>) -> bool {
+        match self.0.keys().enumerate().find_map(|(i, list_index)| {
+            (*list_index == index).then_some(ItemIndex {
+                list_index: *list_index,
+                index_at_indent: i,
+            })
+        }) {
+            Some(item_index) => {
+                out.push(item_index);
+                true
+            }
+            None => match self
+                .0
+                .iter()
+                .enumerate()
+                .find_map(|(i, (list_index, children))| {
+                    children
+                        .as_ref()
+                        .map(|children| children.path(index, out))
+                        .unwrap_or(false)
+                        .then_some(ItemIndex {
+                            list_index: *list_index,
+                            index_at_indent: i,
+                        })
+                }) {
+                Some(list_index) => {
+                    out.push(list_index);
                     true
                 }
                 None => false,
