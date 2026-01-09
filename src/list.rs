@@ -166,25 +166,7 @@ pub struct ItemIndex {
 }
 
 pub fn render(list_items: Vec<ListItem>, rect: Rect, state: &mut ListState) {
-    state.item_index_tree = list_items
-        .iter()
-        .flat_map(|list_item| once(list_item).chain(&list_item.children))
-        .enumerate()
-        .fold(ItemIndexTree::default(), |mut acc, (i, list_item)| {
-            if list_item.indent == 0 {
-                acc.0.insert(i, None);
-            } else {
-                let mut last_entry = acc.0.last_entry().unwrap();
-                if state.expansions.contains(last_entry.key()) {
-                    last_entry
-                        .get_mut()
-                        .get_or_insert_default()
-                        .0
-                        .insert(i, None);
-                }
-            }
-            acc
-        });
+    state.item_index_tree = list_items_to_index_tree(&list_items, state, &mut 0);
 
     if state.item_index_tree.0.is_empty() {
         state.selected_tree_index = None;
@@ -205,14 +187,9 @@ pub fn render(list_items: Vec<ListItem>, rect: Rect, state: &mut ListState) {
     state.scroll_selected_to_view(rect);
 
     let items = list_items
-        .into_iter()
-        .flat_map(|list_item| {
-            list_item
-                .flatten()
-                .into_iter()
-                .map(|list_item| list_item.item.clone().indent(list_item.indent))
-                .collect::<Vec<_>>()
-        })
+        .iter()
+        .flat_map(|list_item| list_item.flatten())
+        .map(|list_item| list_item.item.clone().indent(list_item.indent))
         .enumerate()
         .filter(|(i, _)| state.item_index_tree.contains(*i))
         .skip(state.scroll)
@@ -226,7 +203,30 @@ pub fn render(list_items: Vec<ListItem>, rect: Rect, state: &mut ListState) {
     print_nested_list_with_coordinates(items, rect.x, rect.y, Some(rect.width), Some(rect.height));
 }
 
-#[derive(Debug, Default, Clone)]
+fn list_items_to_index_tree(
+    list_items: &[ListItem],
+    state: &ListState,
+    current_index: &mut usize,
+) -> ItemIndexTree {
+    let mut index_tree = ItemIndexTree(BTreeMap::new());
+    for list_item in list_items {
+        if state.expansions.contains(current_index) && list_item.children.len() > 0 {
+            index_tree.0.insert(
+                *current_index,
+                Some({
+                    *current_index += 1;
+                    list_items_to_index_tree(&list_item.children, state, current_index)
+                }),
+            );
+        } else {
+            index_tree.0.insert(*current_index, None);
+            *current_index += list_item.flatten().len();
+        }
+    }
+    index_tree
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ItemIndexTree(BTreeMap<usize, Option<ItemIndexTree>>);
 
 impl ItemIndexTree {
@@ -319,5 +319,51 @@ impl ItemIndexTree {
                 None => false,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use zellij_tile::shim::NestedListItem;
+
+    use crate::list::{ItemIndexTree, ListItem, ListState, list_items_to_index_tree};
+
+    #[test]
+    fn test_list_items_to_index_tree() {
+        assert_eq!(
+            ItemIndexTree(BTreeMap::from_iter([
+                (0, Some(ItemIndexTree(BTreeMap::from_iter([(1, None)])))),
+                (
+                    3,
+                    Some(ItemIndexTree(BTreeMap::from_iter([(
+                        4,
+                        Some(ItemIndexTree(BTreeMap::from_iter([(5, None)])))
+                    )])))
+                ),
+                (6, None),
+                (9, None)
+            ])),
+            list_items_to_index_tree(
+                &[
+                    ListItem::new(NestedListItem::new("foo"))
+                        .with_children([ListItem::new(NestedListItem::new("bar"))
+                            .with_children([ListItem::new(NestedListItem::new("baz"))])]),
+                    ListItem::new(NestedListItem::new("foobar"))
+                        .with_children([ListItem::new(NestedListItem::new("barfoo"))
+                            .with_children([ListItem::new(NestedListItem::new("foobaz"))])]),
+                    ListItem::new(NestedListItem::new("foo"))
+                        .with_children([ListItem::new(NestedListItem::new("bar"))
+                            .with_children([ListItem::new(NestedListItem::new("baz"))])]),
+                    ListItem::new(NestedListItem::new("apple"))
+                ],
+                &ListState {
+                    expansions: BTreeSet::from_iter([0, 3, 4]),
+                    ..ListState::default()
+                },
+                &mut 0,
+            )
+        )
     }
 }
