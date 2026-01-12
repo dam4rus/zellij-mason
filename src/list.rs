@@ -1,3 +1,27 @@
+//! A multi-level, nested list of text elements.
+//!
+//! Uses the builder pattern to construct a nested list.
+//!
+//! ```rust,no_run
+//!  use zellij_mason::{
+//!      Rect,
+//!      list::{self, ListItem, ListState},
+//!  };
+//!  use zellij_tile::prelude::*;
+//!
+//!  let mut list_state = ListState::default();
+//!  list::render(
+//!      &[ListItem::new(NestedListItem::new("1st level"))
+//!          .with_children([ListItem::new(NestedListItem::new("2nd level"))])],
+//!      Rect {
+//!          x: 0,
+//!          y: 0,
+//!          width: 100,
+//!          height: 2,
+//!      },
+//!      &mut list_state,
+//!  );
+//! ```
 use std::{
     collections::{BTreeMap, BTreeSet},
     iter::once,
@@ -7,6 +31,9 @@ use zellij_tile::ui_components::{NestedListItem, print_nested_list_with_coordina
 
 use crate::Rect;
 
+/// State of a nested list.
+///
+/// Can be constructed using the [ListState::default] constructor to make it compatible with Zellij's plugin system.
 #[derive(Debug, Default, Clone)]
 pub struct ListState {
     selected_tree_index: Option<usize>,
@@ -16,19 +43,7 @@ pub struct ListState {
 }
 
 impl ListState {
-    pub fn selected_tree_index(&self) -> Option<usize> {
-        self.selected_tree_index
-    }
-
-    pub fn selected(&self) -> Option<usize> {
-        self.selected_tree_index().and_then(|selected| {
-            self.item_index_tree
-                .flatten()
-                .into_iter()
-                .position(|i| i == selected)
-        })
-    }
-
+    /// Select the next visible element in the list.
     pub fn select_next(&mut self) {
         self.selected_tree_index = Some(match self.selected_tree_index {
             Some(selected) => self
@@ -39,6 +54,7 @@ impl ListState {
         })
     }
 
+    /// Select the previous visible element in the list.
     pub fn select_prev(&mut self) {
         self.selected_tree_index = Some(
             self.selected_tree_index
@@ -47,12 +63,46 @@ impl ListState {
         );
     }
 
+    /// The path in the tree to the selected index.
+    ///
+    /// E.g. If the selected item is at the 1st indent level, a single element vector is returned.
+    /// If the selected item is at the 2nd indent level, a two element vector is returned
+    /// containing the index of the parent and the selected item.
     pub fn selected_path(&self) -> Option<Vec<ItemIndex>> {
         self.selected_tree_index
             .and_then(|selected| self.path(selected))
     }
 
-    pub fn path(&self, index: usize) -> Option<Vec<ItemIndex>> {
+    /// Expands the selected item, making it's children visible.
+    pub fn expand_selected(&mut self) -> bool {
+        match self.selected_tree_index {
+            Some(selected_index) => {
+                self.expansions.insert(selected_index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Collapses the selected item, making it's children invisible.
+    pub fn collapse_selected(&mut self) -> bool {
+        match self.selected_tree_index {
+            Some(selected_index) => self.collapse(selected_index),
+            _ => false,
+        }
+    }
+
+    /// Maps the selected tree index to the visible list index.
+    fn selected_list_index(&self) -> Option<usize> {
+        self.selected_tree_index.and_then(|selected| {
+            self.item_index_tree
+                .flatten()
+                .into_iter()
+                .position(|i| i == selected)
+        })
+    }
+
+    fn path(&self, index: usize) -> Option<Vec<ItemIndex>> {
         let mut path = Vec::new();
         self.item_index_tree.path(index, &mut path).then(|| {
             path.reverse();
@@ -60,8 +110,8 @@ impl ListState {
         })
     }
 
-    pub fn scroll_selected_to_view(&mut self, rect: Rect) {
-        if let Some(selected_index) = self.selected() {
+    fn scroll_selected_to_view(&mut self, rect: Rect) {
+        if let Some(selected_index) = self.selected_list_index() {
             if selected_index < self.scroll {
                 self.scroll = selected_index;
             } else if selected_index > self.scroll + (rect.height - 1) {
@@ -70,11 +120,7 @@ impl ListState {
         }
     }
 
-    pub fn expand(&mut self, index: usize) {
-        self.expansions.insert(index);
-    }
-
-    pub fn collapse(&mut self, index: usize) -> bool {
+    fn collapse(&mut self, index: usize) -> bool {
         if self.expansions.remove(&index) {
             if let Some(children) = self.item_index_tree.children(index) {
                 for list_index in children.flatten() {
@@ -95,25 +141,11 @@ impl ListState {
             }
         }
     }
-
-    pub fn expand_selected(&mut self) -> bool {
-        match self.selected_tree_index {
-            Some(selected_index) => {
-                self.expansions.insert(selected_index);
-                true
-            }
-            None => false,
-        }
-    }
-
-    pub fn collapse_selected(&mut self) -> bool {
-        match self.selected_tree_index {
-            Some(selected_index) => self.collapse(selected_index),
-            _ => false,
-        }
-    }
 }
 
+/// Describes an item in the list.
+///
+/// Can be constructed from a [zellij_tile::ui_components::NestedListItem].
 #[derive(Debug, Default, Clone)]
 pub struct ListItem {
     item: NestedListItem,
@@ -122,6 +154,7 @@ pub struct ListItem {
 }
 
 impl ListItem {
+    /// Create a new [ListItem] from a [zellij_tile::ui_components::NestedListItem]
     pub fn new(item: NestedListItem) -> Self {
         Self {
             item,
@@ -130,6 +163,7 @@ impl ListItem {
         }
     }
 
+    /// Add children to the [ListItem].
     pub fn with_children(mut self, children: impl IntoIterator<Item = ListItem>) -> Self {
         self.children = children
             .into_iter()
@@ -138,7 +172,7 @@ impl ListItem {
         self
     }
 
-    pub fn with_indent(mut self, indent: usize) -> Self {
+    fn with_indent(mut self, indent: usize) -> Self {
         self.indent = indent;
         self.children = self
             .children
@@ -148,7 +182,10 @@ impl ListItem {
         self
     }
 
-    pub fn flatten(&self) -> Vec<&ListItem> {
+    /// Flattens the [ListItem] and all of it's children recursively.
+    ///
+    /// Meaning the returned container contains the [ListItem] itself as well.
+    fn flatten(&self) -> Vec<&ListItem> {
         once(self)
             .chain(
                 self.children
@@ -159,13 +196,22 @@ impl ListItem {
     }
 }
 
+/// The index of an item in the [ListItem]'s element tree.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ItemIndex {
+    /// The index in the list's tree.
     pub list_index: usize,
+    /// The index of the element in it's indentation level, considered from it's parent.
+    ///
+    /// E.g. if the element is the first child of the second element at the root, it will be 0
     pub index_at_indent: usize,
 }
 
-pub fn render(list_items: Vec<ListItem>, rect: Rect, state: &mut ListState) {
+/// Render list items.
+///
+/// [state] will be mutated based on the passed in [list_items] to update it's internals and
+/// corrigate invalid selection indexes.
+pub fn render(list_items: &[ListItem], rect: Rect, state: &mut ListState) {
     state.item_index_tree = list_items_to_index_tree(&list_items, state, &mut 0);
 
     if state.item_index_tree.0.is_empty() {
