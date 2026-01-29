@@ -1,4 +1,4 @@
-//! Geometry types used for layour and rendering
+//! Geometry types used for layout and rendering
 
 /// Describes a rectangle in 2D space.
 #[derive(Debug, Default, Clone, Copy)]

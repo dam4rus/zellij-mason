@@ -1,8 +1,42 @@
+//! Wrapper around zellij's table widget with state management.
+//!
+//! ```rust,no_run
+//! use zellij_mason::{
+//!     Rect,
+//!     table::{self, TableState},
+//! };
+//! use zellij_tile::prelude::*;
+//!
+//! let mut table_state = TableState::default();
+//! table::render(
+//!     ["Summary", "Description"],
+//!     &[
+//!         [
+//!             Text::new("Do something"),
+//!             Text::new("Something should be done"),
+//!         ],
+//!         [
+//!             Text::new("Another task"),
+//!             Text::new("Just another boring task"),
+//!         ],
+//!     ],
+//!     Rect {
+//!         x: 0,
+//!         y: 0,
+//!         width: 100,
+//!         height: 3,
+//!     },
+//!     &mut table_state,
+//! );
+//! ```
 use std::cmp::Ordering;
 use zellij_tile::prelude::*;
 
 use crate::Rect;
 
+/// State of a table.
+///
+/// Can be constructed using the [TableState::default] constructor to make it compatible with Zellij's plugin system.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TableState {
     selected: Option<usize>,
@@ -10,14 +44,19 @@ pub struct TableState {
 }
 
 impl TableState {
+    /// The selected index.
     pub fn selected(&self) -> Option<usize> {
         self.selected
     }
 
+    /// Select the element at the specific index.
     pub fn select(&mut self, index: usize) {
         self.selected = Some(index);
     }
 
+    /// Move the selection forward or backward by the specified amount.
+    ///
+    /// * `offset`: Positive value moves the selection forward and negative moves it backward.
     pub fn offset_selected(&mut self, offset: isize) {
         self.selected = Some(
             self.selected
@@ -30,15 +69,17 @@ impl TableState {
         );
     }
 
+    /// Select the next row in the table.
     pub fn select_next(&mut self) {
         self.selected = Some(self.selected.map(|i| i.saturating_add(1)).unwrap_or(0));
     }
 
+    /// Select the previous row in the table.
     pub fn select_prev(&mut self) {
         self.selected = Some(self.selected.map(|i| i.saturating_sub(1)).unwrap_or(0));
     }
 
-    pub fn scroll_selected_to_view(&mut self, rect: Rect) {
+    fn scroll_selected_to_view(&mut self, rect: Rect) {
         if let Some(selected_index) = self.selected {
             if selected_index < self.scroll {
                 self.scroll = selected_index;
@@ -49,13 +90,33 @@ impl TableState {
     }
 }
 
+/// Rendering options for the table.
 #[derive(Debug, Default, Clone)]
 pub struct Options {
-    // Truncates text at the given column index to make sure it's at least partially visible.
-    // Useful when a column's text can be pretty long and the columns after the given column is not as important.
+    /// Truncates text at the given column index to make sure it's at least partially visible.
+    ///
+    /// Useful when a column's text can be pretty long and the columns after the given column is not as important.
+    ///
+    /// E.g. without setting truncation a row where the second column's value is "column with long value"
+    /// and the width of table is 20 would render like this:
+    ///
+    /// ```text
+    /// header1
+    /// column
+    /// ```
+    ///
+    /// With [Options::truncate_text_at_column] set to `Some(1)` it would look like this:
+    ///
+    /// ```text
+    /// header1 header2
+    /// column  column with
+    /// ```
     pub truncate_text_at_column: Option<usize>,
 }
 
+/// Render the table with the given header and row at the specified coordinates.
+///
+/// Wrapper around [render_with_options] to make it more convenient to render without options.
 pub fn render<const N: usize>(
     header: [impl ToString; N],
     rows: &[[Text; N]],
@@ -65,6 +126,9 @@ pub fn render<const N: usize>(
     render_with_options(header, rows, rect, state, None);
 }
 
+/// Render the table with the given header and row at the specified coordinates.
+///
+/// * `state`: State of the table. Will be mutated to make invalid selection indexes impossible for the given table.
 pub fn render_with_options<const N: usize>(
     header: [impl ToString; N],
     rows: &[[Text; N]],

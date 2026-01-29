@@ -145,7 +145,7 @@ impl ListState {
 
 /// Describes an item in the list.
 ///
-/// Can be constructed from a [zellij_tile::ui_components::NestedListItem].
+/// Can be constructed from a [NestedListItem].
 #[derive(Debug, Default, Clone)]
 pub struct ListItem {
     item: NestedListItem,
@@ -154,7 +154,7 @@ pub struct ListItem {
 }
 
 impl ListItem {
-    /// Create a new [ListItem] from a [zellij_tile::ui_components::NestedListItem]
+    /// Create a new [ListItem] from a [NestedListItem]
     pub fn new(item: NestedListItem) -> Self {
         Self {
             item,
@@ -209,8 +209,8 @@ pub struct ItemIndex {
 
 /// Render list items.
 ///
-/// [state] will be mutated based on the passed in [list_items] to update it's internals and
-/// corrigate invalid selection indexes.
+/// * `state`: State of the list. Will be mutated based on the passed in `list_items` to update it's internals and
+/// correct invalid selection indexes.
 pub fn render(list_items: &[ListItem], rect: Rect, state: &mut ListState) {
     state.item_index_tree = list_items_to_index_tree(&list_items, state, &mut 0);
 
