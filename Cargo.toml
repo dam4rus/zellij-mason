@@ -7,4 +7,4 @@ license-file = "LICENSE"
 repository = "https://github.com/dam4rus/zellij-mason"
 
 [dependencies]
-zellij-tile = "0.43.1"
+zellij-tile = "0.44.0"
