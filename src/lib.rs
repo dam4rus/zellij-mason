@@ -39,6 +39,7 @@
 //! ```
 
 pub mod geom;
+pub mod help;
 pub mod list;
 pub mod tab;
 pub mod table;
