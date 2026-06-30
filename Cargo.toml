@@ -1,6 +1,6 @@
 [package]
 name = "zellij-mason"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 description = "Layout and rendering helpers for built-in zellij plugin widgets"
 license-file = "LICENSE"
