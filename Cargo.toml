@@ -1,10 +1,10 @@
 [package]
 name = "zellij-mason"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "Layout and rendering helpers for built-in zellij plugin widgets"
 license-file = "LICENSE"
 repository = "https://github.com/dam4rus/zellij-mason"
 
 [dependencies]
-zellij-tile = "0.44.0"
+zellij-tile = "0.45.1"
